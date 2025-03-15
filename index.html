@@ -84,6 +84,8 @@
             runAnalysis(selectedAnalysis, period);
         }
 
+        let chartInstance = null;
+
         function runAnalysis(type, period = null) {
             let endpointMap = {
                 "usage": "total_usage",
@@ -103,23 +105,66 @@
             let url = `http://localhost:8000/${endpoint}`;
             if (period) url += `?period=${period}`;
 
-            // Hide the period selection when running an analysis that doesn't require it
-            if (type !== 'usage' && type !== 'cost') {
-                document.getElementById("periodSelection").style.display = "none";
-            }
-
             fetch(url)
                 .then(response => response.json())
                 .then(data => {
-                    let output = `<h4 class="mt-3">Analysis Result:</h4>`;
-                    output += `<pre>${JSON.stringify(data, null, 2)}</pre>`;
-                    document.getElementById("analysisResults").innerHTML = output;
+                    document.getElementById("analysisResults").innerHTML = "";
+                    
+                    let insightText = data.insight || "No insights available";
+                    let dataset = data.data || data;  // Handle non-standard API responses
+
+                    if (typeof dataset !== "object") {
+                        document.getElementById("analysisResults").innerHTML = `<p>${insightText}</p><pre>${JSON.stringify(data, null, 2)}</pre>`;
+                        return;
+                    }
+
+                    let labels = Object.keys(dataset);
+                    let values = Object.values(dataset);
+
+                    let color = insightText.includes("🔺") ? "red" : "green";
+                    
+                    // Display insight text
+                    document.getElementById("analysisResults").innerHTML = `
+                        <h4 class="mt-3">Analysis Result:</h4>
+                        <p style="color: ${color}; font-weight: bold;">${insightText}</p>
+                        <canvas id="chartCanvas"></canvas>
+                    `;
+
+                    // Destroy previous chart instance if it exists
+                    if (chartInstance) {
+                        chartInstance.destroy();
+                    }
+
+                    // Draw new Chart.js graph
+                    let ctx = document.getElementById("chartCanvas").getContext("2d");
+                    chartInstance = new Chart(ctx, {
+                        type: "line",
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: type === "usage" ? "Energy Usage (kWh)" : "Cost ($)",
+                                data: values,
+                                borderColor: "blue",
+                                backgroundColor: "rgba(0, 123, 255, 0.2)",
+                                borderWidth: 2,
+                                fill: true
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            scales: {
+                                y: { beginAtZero: true }
+                            }
+                        }
+                    });
                 })
                 .catch(err => {
                     console.error("Analysis failed:", err);
-                    document.getElementById("analysisResults").innerHTML = `<div class="alert alert-danger">Analysis failed. Please check the console for details.</div>`;
+                    document.getElementById("analysisResults").innerHTML = `<div class="alert alert-danger">Analysis failed.</div>`;
                 });
         }
+
+
     </script>
 </body>
 </html>

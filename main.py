@@ -53,52 +53,67 @@ def total_usage(period: str = "week"):
         if df is None:
             raise HTTPException(status_code=400, detail="No data uploaded yet")
 
-        if "DATETIME" not in df.columns:
-            return {"error": "DATETIME column not found in uploaded file"}
+        df["DATETIME"] = pd.to_datetime(df["DATETIME"], errors="coerce")
+
+        if period == "day":
+            result = df.groupby(df["DATETIME"].dt.date)["USAGE (kWh)"].sum()
+        elif period == "week":
+            result = df.groupby(df["DATETIME"].dt.to_period("W"))["USAGE (kWh)"].sum()
+        elif period == "month":
+            result = df.groupby(df["DATETIME"].dt.to_period("M"))["USAGE (kWh)"].sum()
+        else:
+            raise HTTPException(status_code=400, detail="Invalid period. Use 'day', 'week', or 'month'.")
+
+        # Convert period indexes to strings
+        result.index = result.index.astype(str)
+        result_dict = result.to_dict()
+
+        # Calculate percentage change
+        values = list(result.values)
+        if len(values) > 1:
+            percent_change = ((values[-1] - values[-2]) / values[-2]) * 100
+            change_msg = f"{'🔺 Increased' if percent_change > 0 else '🔻 Decreased'} by {abs(round(percent_change, 2))}%"
+        else:
+            change_msg = "No previous data for comparison"
+
+        return {"data": result_dict, "insight": change_msg}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/cost_trends")
+def cost_trends(period: str = "week"):
+    try:
+        if df is None:
+            raise HTTPException(status_code=400, detail="No data uploaded yet")
 
         df["DATETIME"] = pd.to_datetime(df["DATETIME"], errors="coerce")
 
         if period == "day":
-            result = df.groupby(df["DATETIME"].dt.date, as_index=False)["USAGE (kWh)"].sum()
-            result.index = result.index.astype(str)  # Convert index to string
+            result = df.groupby(df["DATETIME"].dt.date)["COST"].sum()
         elif period == "week":
-            result = df.groupby(df["DATETIME"].dt.to_period("W"))["USAGE (kWh)"].sum()
-            result.index = result.index.astype(str)  # Convert index to string
+            result = df.groupby(df["DATETIME"].dt.to_period("W"))["COST"].sum()
         elif period == "month":
-            result = df.groupby(df["DATETIME"].dt.to_period("M"))["USAGE (kWh)"].sum()
-            result.index = result.index.astype(str)  # Convert index to string
+            result = df.groupby(df["DATETIME"].dt.to_period("M"))["COST"].sum()
         else:
             raise HTTPException(status_code=400, detail="Invalid period. Use 'day', 'week', or 'month'.")
-        return result.to_dict()  # Fix applied here
+
+        # Convert period indexes to strings
+        result.index = result.index.astype(str)
+        result_dict = result.to_dict()
+
+        # Calculate percentage change
+        values = list(result.values)
+        if len(values) > 1:
+            percent_change = ((values[-1] - values[-2]) / values[-2]) * 100
+            change_msg = f"{'🔺 Increased' if percent_change > 0 else '🔻 Decreased'} by {abs(round(percent_change, 2))}%"
+        else:
+            change_msg = "No previous data for comparison"
+
+        return {"data": result_dict, "insight": change_msg}
     except Exception as e:
-        print("Error:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
-@app.get("/cost_trends")
-def cost_trends(period: str = "day"):
-    print(period)
-    if df is None:
-        raise HTTPException(status_code=400, detail="No data uploaded yet")
-
-    if "DATETIME" not in df.columns:
-        return {"error": "DATETIME column not found in uploaded file"}
-
-    df["DATETIME"] = pd.to_datetime(df["DATETIME"], errors="coerce")
-
-    if period == "day":
-        result = df.groupby(df["DATETIME"].dt.date)["COST"].sum()
-    elif period == "week":
-        result = df.groupby(df["DATETIME"].dt.to_period("W"))["COST"].sum()
-        result.index = result.index.astype(str)  # Convert index to string
-    elif period == "month":
-        result = df.groupby(df["DATETIME"].dt.to_period("M"))["COST"].sum()
-        result.index = result.index.astype(str)  # Convert index to string
-    else:
-        raise HTTPException(status_code=400, detail="Invalid period. Use 'day', 'week', or 'month'.")
-
-    return result.to_dict()
 
 @app.get("/peak_hours")
 def peak_hours():
