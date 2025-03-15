@@ -31,6 +31,14 @@ async def upload_file(file: UploadFile = File(...)):
         data_str = content.decode("utf-8")
         df = pd.read_csv(StringIO(data_str), skiprows=6)  # Adjust if needed
 
+        # Remove spaces in column names
+        df.columns = df.columns.str.strip()
+
+        df["DATETIME"] = pd.to_datetime(df["DATE"] + " " + df["START TIME"], format="%Y-%m-%d %H:%M")
+        df["USAGE (kWh)"] = df["USAGE (kWh)"].astype(float)
+        df["COST"] = df["COST"].astype(str).str.replace("$", "", regex=False).astype(float)
+
+
         if df.empty:
             raise HTTPException(status_code=400, detail="CSV file is empty")
 
@@ -38,19 +46,57 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error processing file: {str(e)}")
 
+
 @app.get("/total_usage")
-def total_usage(period: str = "day"):
+def total_usage(period: str = "week"):
+    try:
+        if df is None:
+            raise HTTPException(status_code=400, detail="No data uploaded yet")
+
+        if "DATETIME" not in df.columns:
+            return {"error": "DATETIME column not found in uploaded file"}
+
+        df["DATETIME"] = pd.to_datetime(df["DATETIME"], errors="coerce")
+
+        if period == "day":
+            result = df.groupby(df["DATETIME"].dt.date, as_index=False)["USAGE (kWh)"].sum()
+            result.index = result.index.astype(str)  # Convert index to string
+        elif period == "week":
+            result = df.groupby(df["DATETIME"].dt.to_period("W"))["USAGE (kWh)"].sum()
+            result.index = result.index.astype(str)  # Convert index to string
+        elif period == "month":
+            result = df.groupby(df["DATETIME"].dt.to_period("M"))["USAGE (kWh)"].sum()
+            result.index = result.index.astype(str)  # Convert index to string
+        else:
+            raise HTTPException(status_code=400, detail="Invalid period. Use 'day', 'week', or 'month'.")
+        return result.to_dict()  # Fix applied here
+    except Exception as e:
+        print("Error:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@app.get("/cost_trends")
+def cost_trends(period: str = "day"):
+    print(period)
     if df is None:
         raise HTTPException(status_code=400, detail="No data uploaded yet")
 
+    if "DATETIME" not in df.columns:
+        return {"error": "DATETIME column not found in uploaded file"}
+
+    df["DATETIME"] = pd.to_datetime(df["DATETIME"], errors="coerce")
+
     if period == "day":
-        result = df.groupby(df["DATETIME"].dt.date)["USAGE (kWh)"].sum()
+        result = df.groupby(df["DATETIME"].dt.date)["COST"].sum()
     elif period == "week":
-        result = df.groupby(df["DATETIME"].dt.to_period("W"))["USAGE (kWh)"].sum().astype(str)
+        result = df.groupby(df["DATETIME"].dt.to_period("W"))["COST"].sum()
+        result.index = result.index.astype(str)  # Convert index to string
     elif period == "month":
-        result = df.groupby(df["DATETIME"].dt.to_period("M"))["USAGE (kWh)"].sum().astype(str)
+        result = df.groupby(df["DATETIME"].dt.to_period("M"))["COST"].sum()
+        result.index = result.index.astype(str)  # Convert index to string
     else:
-        return {"error": "Invalid period. Use 'day', 'week', or 'month'."}
+        raise HTTPException(status_code=400, detail="Invalid period. Use 'day', 'week', or 'month'.")
 
     return result.to_dict()
 
@@ -63,21 +109,6 @@ def peak_hours():
     peak_hour = int(peak.idxmax())
     return {"peak_hour": peak_hour, "usage": peak[peak_hour]}
 
-@app.get("/cost_trends")
-def cost_trends(period: str = "day"):
-    if df is None:
-        raise HTTPException(status_code=400, detail="No data uploaded yet")
-
-    if period == "day":
-        result = df.groupby(df["DATETIME"].dt.date)["COST"].sum()
-    elif period == "week":
-        result = df.groupby(df["DATETIME"].dt.to_period("W"))["COST"].sum().astype(str)
-    elif period == "month":
-        result = df.groupby(df["DATETIME"].dt.to_period("M"))["COST"].sum().astype(str)
-    else:
-        return {"error": "Invalid period. Use 'day', 'week', or 'month'."}
-
-    return result.to_dict()
 
 @app.get("/anomalies")
 def detect_anomalies():
@@ -90,7 +121,7 @@ def detect_anomalies():
     anomalies = df[df["USAGE (kWh)"] > threshold]
     anomalies["DATETIME"] = anomalies["DATETIME"].astype(str)
 
-    return anomalies[["DATETIME", "USAGE (kWh)"]].to_dict(orient="records")
+    return anomalies[["DATETIME", "USAGE (kWh)"]].to_dict()
 
 @app.get("/hourly_usage_trend")
 def hourly_usage_trend():
